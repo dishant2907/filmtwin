@@ -1,0 +1,9 @@
+scenario,fault_start,t2_detect,t2_delay,nu_delay,mean_delay,false_alarm_rate,diagnosis_accuracy,baseline_nu_chart_alarm,baseline_mean_chart_alarm
+baseline,,,,,,0.0,,,
+edge_tc_drift,120.0,146.0,26.0,52.0,180.0,0.0,0.9889867841409692,,
+showerhead_clog,50.0,80.0,30.0,43.0,238.0,0.0,0.9865384615384616,,
+mfc_drift,100.0,183.0,83.0,,62.0,0.0,0.9615384615384616,,
+rf_match_degradation,200.0,211.0,11.0,,43.0,0.0,0.9897959183673469,,
+edge_ring_erosion,0.0,40.0,40.0,29.0,184.0,,0.9803220035778175,,
+leveling_tilt,300.0,302.0,2.0,2.0,,0.0,1.0,,
+mixed_clog_and_match,60.0,89.0,29.0,31.0,207.0,0.0,0.9474708171206225,,
