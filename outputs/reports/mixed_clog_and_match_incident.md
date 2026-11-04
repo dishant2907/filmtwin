@@ -12,7 +12,7 @@
 - s_rf_reflected_W: +103.2
 - defocus: +66.9
 - centre_delta_pct: -40.0
-- mean_nm: -15.8
+- rate_nm_min: -15.8
 
 **Playbook for `rf_match_degradation`.**
 - Expected map pattern: Mean thickness drops, uniformity changes slightly. RI unchanged.

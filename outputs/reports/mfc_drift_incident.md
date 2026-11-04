@@ -8,7 +8,7 @@
 - mfc_drift: -0.0504 (fractional flow error)
 
 **Evidence (largest deviations from healthy, in sigmas):**
-- mean_nm: -17.1
+- rate_nm_min: -17.1
 - ri_mean: -16.5
 - astig_0: +1.5
 - edge_delta_pct: +1.0

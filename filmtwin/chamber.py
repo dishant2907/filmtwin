@@ -97,76 +97,82 @@ class ChamberSimulator:
         last_pm = wafer_index - wafers_since_clean
         return build_condition(self.faults, wafer_index, wafers_since_clean, last_pm, self.aging)
 
+    def process_wafer(self, i: int, recipe: Recipe):
+        """Process one wafer at wafer count i. Returns (wafer_row, site_rows).
+
+        Call wafers in order (0, 1, 2, ...). This is what closed-loop control
+        (Module 4) uses: decide the recipe, run one wafer, look at the result,
+        decide the next recipe.
+        """
+        wafers_since_clean = i % self.pm_interval_wafers
+        if wafers_since_clean == 0 or not hasattr(self, "_rf_seconds"):
+            self._rf_seconds = 0.0
+        cond, truth = self.condition_at(i)
+
+        res = deposit(self.sites, recipe, self.hardware, cond, self.rng,
+                      usable_radius_mm=self.wafer.usable_radius_mm)
+        gas = gas_state(recipe, self.hardware, cond, float(np.mean(res.temperature_C) + 273.15))
+        sensors = self.sensors.read(recipe, cond, self.hardware, gas, self.rng)
+        self._rf_seconds += recipe.dep_time_s
+
+        lot = i // WAFERS_PER_LOT + 1
+        slot = i % WAFERS_PER_LOT + 1
+        wafer_id = f"L{lot:04d}-W{slot:02d}"
+        u = uniformity(res.thickness_nm)
+        active = [k for k in FAULT_KINDS if abs(truth[k]) > 0]
+
+        row = {
+            "wafer_index": i,
+            "wafer_id": wafer_id,
+            "lot_id": f"L{lot:04d}",
+            "slot": slot,
+            "chamber": self.hardware.name,
+            "timestamp": self.start_time + timedelta(seconds=i * self.cycle_time_s),
+            "wafers_since_clean": wafers_since_clean,
+            "rf_hours_since_clean": self._rf_seconds / 3600.0,
+            "pm_event": wafers_since_clean == 0 and i > 0,
+            "sampled_for_metrology": slot in self.metrology_slots,
+        }
+        row.update({f"r_{k}": v for k, v in dataclasses.asdict(recipe).items()})
+        row.update(sensors)
+        row.update({
+            "m_thickness_mean_nm": u["mean"],
+            "m_nu_1sigma_pct": u["nu_1sigma_pct"],
+            "m_nu_range_pct": u["nu_range_pct"],
+            "m_ri_mean": float(np.mean(res.refractive_index)),
+            "m_werr_mean": float(np.mean(res.werr)),
+            "m_rate_nm_min": float(np.mean(res.rate_nm_min)),
+        })
+        row.update({f"gt_{k}": truth[k] for k in FAULT_KINDS})
+        row["gt_label"] = "+".join(active) if active else "none"
+
+        site_rows = [{
+            "wafer_index": i,
+            "wafer_id": wafer_id,
+            "site": s + 1,
+            "x_mm": x,
+            "y_mm": y,
+            "thickness_nm": res.thickness_nm[s],
+            "refractive_index": res.refractive_index[s],
+            "werr": res.werr[s],
+            "temperature_C": res.temperature_C[s],
+        } for s, (x, y) in enumerate(self.sites)]
+        return row, site_rows
+
     def run(self, n_wafers: int, recipe_changes: dict = None):
         """Process n_wafers and return (wafers_df, sites_df).
 
-        recipe_changes: optional {wafer_index: Recipe} to switch recipes
-        mid-run (useful later for run-to-run control experiments).
+        recipe_changes: optional {wafer_index: Recipe} to switch recipes mid-run.
         """
         recipe_changes = recipe_changes or {}
         recipe = self.recipe
         wafer_rows, site_rows = [], []
-        rf_seconds = 0.0
-
         for i in range(n_wafers):
             if i in recipe_changes:
                 recipe = recipe_changes[i]
-            wafers_since_clean = i % self.pm_interval_wafers
-            if wafers_since_clean == 0:
-                rf_seconds = 0.0
-            cond, truth = self.condition_at(i)
-
-            res = deposit(self.sites, recipe, self.hardware, cond, self.rng,
-                          usable_radius_mm=self.wafer.usable_radius_mm)
-            gas = gas_state(recipe, self.hardware, cond, float(np.mean(res.temperature_C) + 273.15))
-            sensors = self.sensors.read(recipe, cond, self.hardware, gas, self.rng)
-            rf_seconds += recipe.dep_time_s
-
-            lot = i // WAFERS_PER_LOT + 1
-            slot = i % WAFERS_PER_LOT + 1
-            wafer_id = f"L{lot:04d}-W{slot:02d}"
-            u = uniformity(res.thickness_nm)
-            active = [k for k in FAULT_KINDS if abs(truth[k]) > 0]
-
-            row = {
-                "wafer_index": i,
-                "wafer_id": wafer_id,
-                "lot_id": f"L{lot:04d}",
-                "slot": slot,
-                "chamber": self.hardware.name,
-                "timestamp": self.start_time + timedelta(seconds=i * self.cycle_time_s),
-                "wafers_since_clean": wafers_since_clean,
-                "rf_hours_since_clean": rf_seconds / 3600.0,
-                "pm_event": wafers_since_clean == 0 and i > 0,
-                "sampled_for_metrology": slot in self.metrology_slots,
-            }
-            row.update({f"r_{k}": v for k, v in dataclasses.asdict(recipe).items()})
-            row.update(sensors)
-            row.update({
-                "m_thickness_mean_nm": u["mean"],
-                "m_nu_1sigma_pct": u["nu_1sigma_pct"],
-                "m_nu_range_pct": u["nu_range_pct"],
-                "m_ri_mean": float(np.mean(res.refractive_index)),
-                "m_werr_mean": float(np.mean(res.werr)),
-                "m_rate_nm_min": float(np.mean(res.rate_nm_min)),
-            })
-            row.update({f"gt_{k}": truth[k] for k in FAULT_KINDS})
-            row["gt_label"] = "+".join(active) if active else "none"
+            row, sites = self.process_wafer(i, recipe)
             wafer_rows.append(row)
-
-            for s, (x, y) in enumerate(self.sites):
-                site_rows.append({
-                    "wafer_index": i,
-                    "wafer_id": wafer_id,
-                    "site": s + 1,
-                    "x_mm": x,
-                    "y_mm": y,
-                    "thickness_nm": res.thickness_nm[s],
-                    "refractive_index": res.refractive_index[s],
-                    "werr": res.werr[s],
-                    "temperature_C": res.temperature_C[s],
-                })
-
+            site_rows.extend(sites)
         return pd.DataFrame(wafer_rows), pd.DataFrame(site_rows)
 
     # -- ideal maps for plotting --------------------------------------------

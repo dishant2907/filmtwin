@@ -135,7 +135,8 @@ def _ideal_features(recipe, hw, cond, xy):
     res = deposit(xy, recipe, hw, cond, noise=False)
     gas = gas_state(recipe, hw, cond, float(np.mean(res.temperature_C) + 273.15))
     sens = SensorModel().read(recipe, cond, hw, gas, _NoNoise())
-    return features_from_arrays(res.thickness_nm, res.refractive_index, res.werr, sens).iloc[0]
+    return features_from_arrays(res.thickness_nm, res.refractive_index, res.werr, sens,
+                                recipe.dep_time_s).iloc[0]
 
 
 def build_signatures(recipe: Recipe = None, hw: Hardware = None, features=FEATURES):

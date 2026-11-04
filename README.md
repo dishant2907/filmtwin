@@ -8,6 +8,18 @@ Real fab data is proprietary, so almost no public datasets come with a known roo
 
 ![Fault gallery](outputs/figures/02_fault_gallery.png)
 
+## If you have two minutes
+
+| Look at | What it shows |
+|---|---|
+| [`docs/OCAP_PECVD_THICKNESS.md`](docs/OCAP_PECVD_THICKNESS.md) | The out-of-control action plan as a flowchart, and the reaction plan per fault |
+| [`outputs/doe/doe_report.md`](outputs/doe/doe_report.md) | A full DOE write-up: screening, response surface, optimum, confirmation |
+| [`outputs/reports/mixed_clog_and_match_incident.md`](outputs/reports/mixed_clog_and_match_incident.md) | An auto-generated incident report diagnosing two simultaneous faults |
+| `outputs/figures/35_case_mixed.png` | Wafer map, evidence and diagnosis on one page |
+| `outputs/figures/44_r2r_control.png` | Run-to-run control holding thickness, and how the hidden drift is still caught |
+
+Everything is pure Python (numpy, pandas, matplotlib). There are 40 tests, and every figure regenerates with one command per module.
+
 ## Status
 
 | Module | What it does | Status |
@@ -15,8 +27,15 @@ Real fab data is proprietary, so almost no public datasets come with a known roo
 | 1. Chamber twin | Grove-model deposition, radial profiles, aging, 6 fault types, sensors, datasets | **Done** |
 | 2. Metrology engine | Simulated spectral reflectometer, transfer-matrix fitting of thickness and index, gauge study | **Done** |
 | 3. Root-cause diagnosis | Zernike features, context-aware T-squared detection, physics-based signature decomposition, incident reports | **Done** |
-| 4. DOE, SPC, run-to-run | Factorial/RSM designs, control charts with OCAP, EWMA run-to-run control | Next |
-| 5. Virtual metrology | VM model on the public PHM 2016 CMP dataset | Planned |
+| 4. DOE, SPC, run-to-run | Fractional factorial + response surface optimisation, SPC with an executable OCAP, EWMA run-to-run control | **Done** |
+| 5. Virtual metrology | VM model on the public PHM 2016 CMP dataset | Next |
+
+## Headline results (Module 4)
+
+- **DOE.** A 20-wafer screening experiment plus a 20-wafer response surface cut 1-sigma non-uniformity from **1.27 % to 0.20 %** and raised deposition rate from **292 to 336 nm/min**, with refractive index held on target. The result was confirmed on 5 wafers. See `outputs/doe/doe_report.md`.
+- **Run-to-run control.** During an MFC drift, out-of-spec wafers fell from **43 % to 0 %** and Ppk rose from 0.06 to 2.74, using EWMA feedback plus a feedforward term learned from history.
+- **Monitoring the controller.** The controller hides the drift from thickness charts. An engineering limit on its output caught the fault with zero false alarms on five healthy runs, and the diagnoser still named the cause correctly on 95 % of flagged wafers.
+- **OCAP.** The executable action plan made three different, correct calls during one excursion: watch, continue with a ticket, and hold. See `docs/OCAP_PECVD_THICKNESS.md`.
 
 ## Headline results (Module 3, scored against ground truth)
 
@@ -49,9 +68,11 @@ pip install -r requirements.txt
 
 python3 tests/test_module1.py          # 11 physics and simulator checks
 python3 tests/test_module2_3.py        # 15 metrology and diagnosis checks
+python3 tests/test_module4.py          # 14 statistics, DOE, SPC and control checks
 python3 examples/run_module1_demo.py   # chamber figures + datasets (~10 s)
 python3 examples/run_module2_demo.py   # metrology figures (~15 s)
 python3 examples/run_module3_demo.py   # detection, diagnosis, scorecard, reports (~1 min)
+python3 examples/run_module4_demo.py   # DOE, SPC + OCAP, run-to-run control (~1 min)
 ```
 
 Figures land in `outputs/figures/`, datasets in `data/` (about 32 MB, so `data/` is git-ignored; anyone can regenerate it with the demo script).
@@ -73,9 +94,13 @@ filmtwin/
   zernike.py    Zernike polynomials and fast wafer-map decomposition
   features.py   Per-wafer feature vector: map shape, film, sensors
   diagnosis.py  Healthy reference model, T-squared detection, signature decomposition, scoring
-examples/run_module1_demo.py, run_module2_demo.py, run_module3_demo.py
-tests/test_module1.py, test_module2_3.py
-docs/         Interview notes for each module
+  stats.py      t and F distributions, regression with ANOVA, prediction intervals (numpy only)
+  doe.py        Fractional factorial and CCD designs, analysis, desirability optimisation
+  spc.py        I-MR, EWMA, CUSUM, Western Electric rules, capability, context limits, OCAP
+  r2r.py        EWMA run-to-run controller with feedforward, closed-loop simulation
+examples/run_module1_demo.py ... run_module4_demo.py
+tests/test_module1.py, test_module2_3.py, test_module4.py
+docs/         Interview notes for each module, OCAP flowchart
 ```
 
 ## The physics
@@ -165,7 +190,7 @@ Three failure modes are built in, because knowing when to distrust the number is
 
 Each wafer is reduced to 15 features:
 
-- mean thickness,
+- deposition rate (mean thickness ÷ time, so diagnosis still works when a controller changes the time),
 - Zernike tilt, defocus and astigmatism,
 - centre and edge deltas,
 - refractive index,
@@ -192,6 +217,31 @@ Every scenario also gets an auto-written incident report in `outputs/reports/`. 
 - the strongest evidence,
 - the playbook for the *diagnosed* fault.
 
+## Module 4: DOE, SPC and run-to-run control
+
+**DOE** (`doe.py`, `stats.py`) runs the standard four-stage workflow on the twin, with every run a real simulated wafer in randomised order:
+
+1. **Screen.** A 2^(6-2) resolution IV fractional factorial with centre points tests six recipe knobs.
+2. **Model.** A face-centred central composite design fits quadratic surfaces on the vital few.
+3. **Optimise.** Derringer desirability trades rate against uniformity, index and wet etch rate.
+4. **Confirm.** Runs at the optimum are compared against prediction intervals.
+
+Uniformity is modelled through the signed edge-minus-centre profile, because 1-sigma NU folds into a V at its minimum and a quadratic can't fit it. The p-values are computed from scratch and checked against scipy to 8 decimal places. The design and results tables are exported as CSV for re-analysis in JMP.
+
+![Process window](outputs/figures/41_doe_process_window.png)
+
+**SPC** (`spc.py`) covers:
+
+- I-MR, EWMA and CUSUM charts,
+- Western Electric rules 1–4,
+- Cp/Cpk/Pp/Ppk capability,
+- context-aware limits that remove the normal between-cleans drift,
+- an **OCAP written as code**, which re-measures, checks context and sensors, calls the Module 3 diagnoser, and logs its disposition.
+
+**Run-to-run control** (`r2r.py`) is an EWMA controller on deposition time. It includes the realistic details: metrology sampling (2 wafers per lot), measurement delay, step clamps, and a feedforward term for the first wafers after a clean, learned from historical data.
+
+![Run-to-run control](outputs/figures/44_r2r_control.png)
+
 ## Limitations (stated plainly)
 
 - The model is physically motivated but **not calibrated to any commercial tool**. Constants were set so the default recipe lands in a realistic window. Absolute numbers will differ from a real chamber; the directions and the relative signatures are the point.
@@ -202,6 +252,8 @@ Every scenario also gets an auto-written incident report in `outputs/reports/`. 
 - **Module 3 diagnosis is tested on data from the same model family that produced its signatures.** That is the biggest caveat. The robustness checks (three different chambers, plus one unseen fault) reduce it but do not remove it. Real faults are messier, and real signatures would be built from a mix of physics, historical incidents and engineering judgement.
 - T-squared pools 15 features, so a shift in a single feature is diluted. That is why the plain mean chart catches MFC drift faster. A production system would run both multivariate and univariate charts.
 - Signatures are linear approximations. Edge ring severity is slightly underestimated at the high end, where the physics becomes nonlinear.
+- The DOE optimum puts pressure at the edge of the tested range. The model includes no particle or stress constraints, which would limit high pressure on a real tool.
+- The run-to-run controller adjusts time only. Real controllers often adjust several knobs and handle tool-to-tool matching.
 
 Module 5 adds a real public dataset so the analysis methods are also proven on real fab data.
 

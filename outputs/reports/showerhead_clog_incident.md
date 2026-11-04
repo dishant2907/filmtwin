@@ -10,7 +10,7 @@
 **Evidence (largest deviations from healthy, in sigmas):**
 - defocus: +67.6
 - centre_delta_pct: -38.7
-- mean_nm: -4.1
+- rate_nm_min: -4.1
 - s_vpp_V: -1.7
 
 **Playbook for `showerhead_clog`.**

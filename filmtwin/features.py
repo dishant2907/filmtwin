@@ -25,7 +25,11 @@ RING3 = np.arange(25, 49)
 # so the Zernike 'spherical' term would be an exact linear combination of them
 # and make the healthy covariance matrix singular. It is left out on purpose.
 ZERNIKE_FEATURES = ["tilt_x", "tilt_y", "defocus", "astig_0", "astig_45"]
-MAP_FEATURES = ["mean_nm"] + ZERNIKE_FEATURES + ["centre_delta_pct", "edge_delta_pct"]
+# Deposition RATE (mean thickness / time), not thickness: a run-to-run
+# controller changes deposition time to hold thickness on target, which hides
+# a rate drift in thickness but not in rate. With fixed time the two are
+# equivalent (T-squared and the diagnosis are scale-invariant per feature).
+MAP_FEATURES = ["rate_nm_min"] + ZERNIKE_FEATURES + ["centre_delta_pct", "edge_delta_pct"]
 FILM_FEATURES = ["ri_mean", "werr_edge_delta"]
 SENSOR_FEATURES = ["s_rf_reflected_W", "s_vpp_V", "s_heater_edge_pct", "s_heater_center_pct",
                    "s_throttle_valve_pct"]
@@ -41,15 +45,18 @@ def _fitter():
     return _FITTER
 
 
-def features_from_arrays(thk, ri, werr, sensors: dict = None) -> pd.DataFrame:
-    """thk, ri, werr: (n_wafers, 49) arrays in the standard site order."""
+def features_from_arrays(thk, ri, werr, sensors: dict = None, dep_time_s=103.0) -> pd.DataFrame:
+    """thk, ri, werr: (n_wafers, 49) arrays in the standard site order.
+
+    dep_time_s: scalar or per-wafer deposition time, used for the rate feature.
+    """
     thk = np.atleast_2d(thk)
     ri = np.atleast_2d(ri)
     werr = np.atleast_2d(werr)
     mean = thk.mean(axis=1)
     coeffs = _fitter().fit(normalise_map(thk))
     names = _fitter().names
-    out = {"mean_nm": mean}
+    out = {"mean_nm": mean, "rate_nm_min": mean / np.asarray(dep_time_s, float) * 60.0}
     for f in ZERNIKE_FEATURES:
         out[f] = coeffs[:, names.index(f)]
     out["centre_delta_pct"] = (thk[:, CENTRE].mean(axis=1) - thk[:, RING1].mean(axis=1)) / mean * 100
@@ -78,7 +85,7 @@ def wafer_features(wafers: pd.DataFrame, sites: pd.DataFrame) -> pd.DataFrame:
     werr = s["werr"].to_numpy().reshape(-1, 49)
     w = wafers.sort_values("wafer_index").reset_index(drop=True)
     sensors = {k: w[k].to_numpy() for k in SENSOR_FEATURES}
-    feats = features_from_arrays(thk, ri, werr, sensors)
+    feats = features_from_arrays(thk, ri, werr, sensors, w["r_dep_time_s"].to_numpy())
     keep = ["wafer_index", "wafer_id", "lot_id", "wafers_since_clean", "pm_event",
             "m_nu_1sigma_pct"] + [c for c in w.columns if c.startswith("gt_")]
     if "scenario" in w.columns:

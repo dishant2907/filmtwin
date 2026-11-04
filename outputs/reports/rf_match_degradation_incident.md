@@ -9,7 +9,7 @@
 
 **Evidence (largest deviations from healthy, in sigmas):**
 - s_rf_reflected_W: +128.8
-- mean_nm: -17.6
+- rate_nm_min: -17.6
 - s_vpp_V: -10.0
 - s_heater_edge_pct: +2.3
 

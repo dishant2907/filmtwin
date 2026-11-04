@@ -10,7 +10,7 @@
 **Evidence (largest deviations from healthy, in sigmas):**
 - edge_delta_pct: +56.3
 - defocus: +45.4
-- mean_nm: +10.6
+- rate_nm_min: +10.6
 - werr_edge_delta: -7.6
 
 **Playbook for `edge_ring_erosion`.**
